@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+    CloudFormation Template for Converter Application.That is downloaded from Github repository, then installed on Flask. Balanced with ELB.
+Parameters:
+  KeyName:
+    Description: Enter the name of your Key Pair for EC2 
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Select existing EC2 KeyPair
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - m1.small
+      - m1.large
+    Description: Select one.
+  MaximVPC:
+    Description: VPC Id of your account
+    Type: AWS::EC2::VPC::Id
+  
+
+Resources:
+  MaximSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enables SSH and HTTP ports #required
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref MaximVPC
+
+  MaximALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 25
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref MaximVPC
+
+  MaximApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      SecurityGroups:
+        - !GetAtt MaximSecGroup.GroupId
+      Subnets: !Ref MaximSubnets
+
+  MaximALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions: #required
+        - Type: forward
+          TargetGroupArn: !Ref MaximALBTargetGroup
+      LoadBalancerArn: !Ref MaximApplicationLoadBalancer #required
+      Port: 80
+      Protocol: HTTP
+
+  MaximLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        KeyName: !Ref KeyName
+        ImageId: !FindInMap 
+          - RegionImageMap
+          - !Ref AWS::Region
+          - AMI
+        UserData: !Base64 |
+            #! /bin/bash
+            yum update -y
+            yum install python3 -y
+            pip3 install flask
+            cd /home/ec2-user
+            FOLDER="https://raw.githubusercontent.com/maximkim-create/tamasha/master/aws/projects/Project-002-Milliseconds-Converter"
+            wget $FOLDER/app.py
+            wget -P templates $FOLDER/templates/index.html
+            wget -P templates $FOLDER/templates/result.html
+            python3 app.py
+
+        SecurityGroupIds:
+          - !Ref MaximSecGroup
+        InstanceType: !Ref InstanceType
+  
+  MaximAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AvailabilityZones: !GetAZs 
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MaximLaunchTemplate
+        Version: '1'
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 90
+      MinSize: '1'
+      DesiredCapacity: '2'
+      MaxSize: '3'
+      TargetGroupARNs:
+        - !Ref MaximALBTargetGroup
+
+
+
+Outputs:
+  AppURL:
+    Description: URL of Maxim App
+    Value: !Join 
+      - ''
+      - - 'http://'
+        - !GetAtt MaximApplicationLoadBalancer.DNSName
+        
+      
+      SecurityGroupIds:
+        - !Ref MaximSecurityGroup
+      Tags:
+
+        - Key: Name
+          Value: !Sub Web Server of ${AWS::StackName}
+
+
